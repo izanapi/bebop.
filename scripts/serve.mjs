@@ -1,0 +1,7 @@
+import http from 'node:http';import {readFile,readdir,mkdir} from 'node:fs/promises';import {DatabaseSync} from 'node:sqlite';
+import worker from '../dist/server/index.js';
+await mkdir('.sites-runtime',{recursive:true});const sqlite=new DatabaseSync('.sites-runtime/practice.sqlite');
+sqlite.exec('CREATE TABLE IF NOT EXISTS local_migrations (name TEXT PRIMARY KEY)');
+for(const f of (await readdir('drizzle')).filter(n=>n.endsWith('.sql')).sort()){if(!sqlite.prepare('SELECT name FROM local_migrations WHERE name=?').get(f)){sqlite.exec(await readFile('drizzle/'+f,'utf8'));sqlite.prepare('INSERT INTO local_migrations VALUES (?)').run(f);}}
+const DB={prepare(sql){let values=[];return {bind(...v){values=v;return this;},async all(){return {results:sqlite.prepare(sql).all(...values)};},async run(){return sqlite.prepare(sql).run(...values);}};}};
+http.createServer(async(req,res)=>{try{const chunks=[];for await(const chunk of req)chunks.push(chunk);const headers=new Headers(req.headers);headers.set('oai-authenticated-user-id','local-preview');const request=new Request('http://127.0.0.1:4173'+req.url,{method:req.method,headers,...(!['GET','HEAD'].includes(req.method)?{body:Buffer.concat(chunks)}:{})});const response=await worker.fetch(request,{DB});res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));}catch(e){console.error(e);res.writeHead(500).end('Preview error');}}).listen(4173,'127.0.0.1',()=>console.log('Local: http://127.0.0.1:4173'));
